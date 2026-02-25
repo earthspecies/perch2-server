@@ -28,6 +28,9 @@ SPARQLWrapper = "^2.0.0"
 tqdm = "^4.6"
 tensorflow = "^2.20"
 tf-keras = "^2.20"
+fastapi = ">=0.100"
+uvicorn = {version = ">=0.23", extras = ["standard"]}
+soundfile = ">=0.12"
 
 [tool.poetry.group.jaxtrain]
 optional = true
