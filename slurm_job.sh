@@ -21,7 +21,7 @@
 set -e
 
 PORT=8000
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$HOME/perch2-server"
 ADDR_FILE="${PERCH2_ADDR_FILE:-$REPO_DIR/server.addr}"
 
 # Write hostname:port so clients can find us
