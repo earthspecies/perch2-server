@@ -20,7 +20,7 @@
 
 set -e
 
-PORT=8000
+PORT=8002
 REPO_DIR="$HOME/perch2-server"
 ADDR_FILE="${PERCH2_ADDR_FILE:-$REPO_DIR/server.addr}"
 
@@ -36,8 +36,10 @@ export PERCH2_VERSION="${PERCH2_VERSION:-1}"
 cd "$REPO_DIR"
 mkdir -p logs
 
+uv venv
 uv pip install fastapi "uvicorn[standard]" soundfile librosa \
-  "perch_hoplite @ git+ssh://git@github.com/google-research/perch-hoplite.git@main" \
-  tensorflow "kagglehub>=0.4.1" ml_collections
+  "perch_hoplite @ git+https://github.com/google-research/perch-hoplite.git@main" \
+  tensorflow ml_collections
+uv pip install "kagglehub>=0.4.1"
 
-uv run uvicorn server:app --host 0.0.0.0 --port "$PORT" --workers 1
+.venv/bin/uvicorn server:app --host 0.0.0.0 --port "$PORT" --workers 1
