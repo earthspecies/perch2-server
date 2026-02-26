@@ -33,13 +33,16 @@ echo "Server address: $(cat $ADDR_FILE)"
 # The model is downloaded automatically on first run via kagglehub.
 export PERCH2_VERSION="${PERCH2_VERSION:-1}"
 
+# TF GPU libraries are not available on this cluster; always use the CPU model.
+export PERCH2_CPU=1
+
 cd "$REPO_DIR"
 mkdir -p logs
 
-uv venv
-uv pip install fastapi "uvicorn[standard]" soundfile librosa \
+uv venv --python 3.12 --allow-existing
+uv pip install --python .venv/bin/python fastapi "uvicorn[standard]" soundfile librosa \
   "perch_hoplite @ git+https://github.com/google-research/perch-hoplite.git@main" \
-  tensorflow ml_collections
-uv pip install "kagglehub>=0.4.1"
+  "tensorflow[and-cuda]" ml_collections
+uv pip install --python .venv/bin/python "kagglehub>=0.4.1"
 
 .venv/bin/uvicorn server:app --host 0.0.0.0 --port "$PORT" --workers 1

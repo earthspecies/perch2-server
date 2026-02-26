@@ -2,8 +2,8 @@
 
 Exposes three endpoints:
   GET  /health  — liveness check
-  GET  /labels  — ordered list of ebird codes matching logit indices
-  POST /logits  — send raw WAV bytes, receive classification logits
+  GET  /labels  — ordered list of scientific names matching logit indices
+  POST /logits  — send batch of raw float32 PCM bytes, receive classification logits
   POST /embed   — send raw WAV bytes, receive backbone embedding
 
 The model is downloaded automatically from Kaggle on first run and cached
@@ -93,37 +93,39 @@ def health():
 
 @app.get("/labels")
 def labels():
-    """Return the ordered list of ebird codes corresponding to logit indices."""
+    """Return the ordered list of scientific names corresponding to logit indices."""
     return _state["labels"]
 
 
 @app.post("/logits")
 async def logits(request: Request):
-    """Accept a mono WAV clip as raw bytes (Content-Type: application/octet-stream).
+    """Accept a batch of mono audio clips as raw float32 PCM bytes.
 
-    The clip should be 5 seconds at 32 kHz. Other sample rates are resampled.
-    Returns {"logits": [[float, ...]]} with shape [1, n_classes].
+    The body must be N * WINDOW_SAMPLES * 4 bytes: N clips concatenated,
+    each exactly WINDOW_SAMPLES float32 samples (5 s at 32 kHz, little-endian).
+    Batch size N is inferred from the payload length.
+    Returns {"logits": [[float, ...]]} with shape [N, n_classes].
     """
     body = await request.body()
-    try:
-        audio = _decode_wav(body)
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Could not decode audio: {e}")
-
-    if len(audio) != WINDOW_SAMPLES:
+    n_clips, remainder = divmod(len(body), WINDOW_SAMPLES * 4)
+    if n_clips == 0 or remainder != 0:
         raise HTTPException(
             status_code=422,
-            detail=f"Expected {WINDOW_SAMPLES} samples (5 s @ 32 kHz), got {len(audio)}.",
+            detail=(
+                f"Body length {len(body)} B is not a positive multiple of "
+                f"{WINDOW_SAMPLES * 4} B (1 clip = {WINDOW_SAMPLES} float32 samples)."
+            ),
         )
 
-    outputs = _state["model"].embed(audio)
+    audio_batch = np.frombuffer(body, dtype=np.float32).reshape(n_clips, WINDOW_SAMPLES)
 
-    # outputs.logits is a dict e.g. {"label": array[frames, n_classes]}
-    # Note: class_list key is "labels" (plural) but inference key is "label" (singular).
-    # Average over frames to get one vector per clip.
-    label_logits = outputs.logits["label"].mean(axis=0)
+    outputs = _state["model"].batch_embed(audio_batch)
 
-    return {"logits": [label_logits.tolist()]}
+    # outputs.logits["label"] shape: [B, n_frames, n_classes]
+    # With window_size == hop_size == 5 s, n_frames == 1; mean over axis=1 is safe generally.
+    label_logits = outputs.logits["label"].mean(axis=1)  # [B, n_classes]
+
+    return {"logits": label_logits.tolist()}
 
 
 @app.post("/embed")
