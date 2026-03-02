@@ -41,7 +41,7 @@ mkdir -p logs
 
 uv venv --python 3.12 --allow-existing
 uv pip install --python .venv/bin/python fastapi "uvicorn[standard]" soundfile librosa \
-  "perch_hoplite @ git+https://github.com/google-research/perch-hoplite.git@4ce90496bde08dd53a35ab6983d7da691d11ecbb" \
+  "perch_hoplite @ git+https://github.com/google-research/perch-hoplite.git@main" \
   "tensorflow[and-cuda]" ml_collections
 uv pip install --python .venv/bin/python "kagglehub>=0.4.1"
 
