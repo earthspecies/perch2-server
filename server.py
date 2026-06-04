@@ -1,6 +1,7 @@
 """FastAPI server wrapping the Perch 2 bird sound classifier.
 
-Exposes three endpoints:
+Exposes these endpoints:
+  GET  /        — active configuration (labels, sample_rate, window_samples)
   GET  /health  — liveness check
   GET  /labels  — ordered list of scientific names matching logit indices
   POST /logits  — send batch of raw float32 PCM bytes, receive classification logits
@@ -85,6 +86,16 @@ def _decode_wav(body: bytes) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+@app.get("/")
+def describe():
+    """Return the active configuration of this adapter (used by HttpClient.describe())."""
+    return {
+        "labels": _state["labels"],
+        "sample_rate": SAMPLE_RATE,
+        "window_samples": WINDOW_SAMPLES,
+    }
+
 
 @app.get("/health")
 def health():

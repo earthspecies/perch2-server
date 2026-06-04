@@ -3,10 +3,9 @@
 #SBATCH --partition=a100-40
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=12
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
-#SBATCH --time=24:00:00
 #SBATCH --output=/home/%u/logs/perch2-server-%j.out
 
 # ---------------------------------------------------------------------------
@@ -45,4 +44,5 @@ uv pip install --python .venv/bin/python fastapi "uvicorn[standard]" soundfile l
   "tensorflow[and-cuda]" ml_collections
 uv pip install --python .venv/bin/python "kagglehub>=0.4.1"
 
+export CUDA_VISIBLE_DEVICES=""
 .venv/bin/uvicorn server:app --host 0.0.0.0 --port "$PORT" --workers 1
