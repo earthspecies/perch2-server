@@ -4,7 +4,7 @@ Exposes these endpoints:
   GET  /        — active configuration (labels, sample_rate, window_samples)
   GET  /health  — liveness check
   GET  /labels  — ordered list of scientific names matching logit indices
-  POST /logits  — send batch of raw float32 PCM bytes, receive classification logits
+  POST /logits  — send {"audio": "<base64 float32 PCM bytes>"}, receive classification logits
   POST /embed   — send raw WAV bytes, receive backbone embedding
 
 The model is downloaded automatically from Kaggle on first run and cached
@@ -19,6 +19,7 @@ Environment variables:
   PERCH2_CPU       set to "1" to load the CPU-only model variant (for machines without GPU)
 """
 
+import base64
 import io
 import os
 from contextlib import asynccontextmanager
@@ -26,6 +27,7 @@ from contextlib import asynccontextmanager
 import numpy as np
 import soundfile as sf
 from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel
 from perch_hoplite.zoo import hub
 from perch_hoplite.zoo.taxonomy_model_tf import TaxonomyModelTF
 from ml_collections import config_dict
@@ -61,7 +63,10 @@ async def lifespan(app: FastAPI):
     _state["model"] = model
     _state["labels"] = list(model.class_list["labels"].classes)
 
-    print(f"Perch 2 server ready. {len(_state['labels'])} classes.")
+    import tensorflow as tf
+    gpus = tf.config.list_physical_devices("GPU")
+    device = f"{len(gpus)}x GPU" if gpus else "CPU"
+    print(f"Perch 2 server ready. {len(_state['labels'])} classes on {device}.")
     yield
     # --- shutdown: nothing to clean up ---
 
@@ -108,27 +113,35 @@ def labels():
     return _state["labels"]
 
 
-@app.post("/logits")
-async def logits(request: Request):
-    """Accept a batch of mono audio clips as raw float32 PCM bytes.
+class LogitsRequest(BaseModel):
+    audio: str  # base64-encoded float32 PCM bytes
 
-    The body must be N * WINDOW_SAMPLES * 4 bytes: N clips concatenated,
+
+@app.post("/logits")
+def logits(body: LogitsRequest):
+    """Accept a batch of mono audio clips as base64-encoded float32 PCM bytes.
+
+    The decoded bytes must be N * WINDOW_SAMPLES * 4 bytes: N clips concatenated,
     each exactly WINDOW_SAMPLES float32 samples (5 s at 32 kHz, little-endian).
-    Batch size N is inferred from the payload length.
+    Batch size N is inferred from the decoded payload length.
     Returns {"logits": [[float, ...]]} with shape [N, n_classes].
     """
-    body = await request.body()
-    n_clips, remainder = divmod(len(body), WINDOW_SAMPLES * 4)
+    try:
+        raw = base64.b64decode(body.audio)
+    except Exception:
+        raise HTTPException(status_code=422, detail="audio field is not valid base64.")
+
+    n_clips, remainder = divmod(len(raw), WINDOW_SAMPLES * 4)
     if n_clips == 0 or remainder != 0:
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Body length {len(body)} B is not a positive multiple of "
+                f"Decoded audio length {len(raw)} B is not a positive multiple of "
                 f"{WINDOW_SAMPLES * 4} B (1 clip = {WINDOW_SAMPLES} float32 samples)."
             ),
         )
 
-    audio_batch = np.frombuffer(body, dtype=np.float32).reshape(n_clips, WINDOW_SAMPLES)
+    audio_batch = np.frombuffer(raw, dtype=np.float32).reshape(n_clips, WINDOW_SAMPLES)
 
     outputs = _state["model"].batch_embed(audio_batch)
 
