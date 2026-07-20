@@ -136,3 +136,38 @@ docker run --rm -t perch python -m unittest discover -s chirp/tests -p "*test.py
 ```
 
 *This is not an officially supported Google product.*
+
+---
+
+## Running the Perch 2 inference server (local addition)
+
+> **Note:** This section documents `server.py` and `slurm_job.sh`, which are **not part of the official Perch code**. They are a local addition that wraps the Perch 2 classifier in a small [FastAPI](https://fastapi.tiangolo.com/) service for use as an inference backend.
+
+`server.py` exposes the model over HTTP with the following endpoints:
+
+* `GET /` — active configuration (`labels`, `sample_rate`, `window_samples`)
+* `GET /health` — liveness check
+* `GET /labels` — ordered list of scientific names matching the logit indices
+* `POST /logits` — send `{"audio": "<base64 float32 PCM bytes>"}`, receive classification logits
+* `POST /embed` — send raw WAV bytes, receive the backbone embedding
+
+The model is downloaded automatically from Kaggle on first run and cached locally by `kagglehub`. Two environment variables control which model is loaded:
+
+* `PERCH2_VERSION` — integer version of the Perch v2 Kaggle model (default: `1`)
+* `PERCH2_CPU` — set to `1` to load the CPU-only variant (for machines without a GPU)
+
+### Running locally
+
+```bash
+uvicorn server:app --host 0.0.0.0 --port 8000
+```
+
+### Launching on Slurm
+
+`slurm_job.sh` runs the server as a persistent Slurm job. It provisions a `uv` virtual environment, installs the dependencies, and starts `uvicorn`:
+
+```bash
+sbatch slurm_job.sh
+```
+
+By default it requests one GPU on the `a100-40` partition and serves on port `8002`. On startup it writes `<hostname>:<port>` to an address file (`server.addr` in the repo directory, or the path in `PERCH2_ADDR_FILE`) so that clients can discover the running server. Job output is logged to `~/logs/perch2-server-<jobid>.out`.
