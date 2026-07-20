@@ -155,19 +155,3 @@ The model is downloaded automatically from Kaggle on first run and cached locall
 
 * `PERCH2_VERSION` — integer version of the Perch v2 Kaggle model (default: `1`)
 * `PERCH2_CPU` — set to `1` to load the CPU-only variant (for machines without a GPU)
-
-### Running locally
-
-```bash
-uvicorn server:app --host 0.0.0.0 --port 8000
-```
-
-### Launching on Slurm
-
-`slurm_job.sh` runs the server as a persistent Slurm job. It provisions a `uv` virtual environment, installs the dependencies, and starts `uvicorn`:
-
-```bash
-sbatch slurm_job.sh
-```
-
-By default it requests one GPU on the `a100-40` partition and serves on port `8002`. On startup it writes `<hostname>:<port>` to an address file (`server.addr` in the repo directory, or the path in `PERCH2_ADDR_FILE`) so that clients can discover the running server. Job output is logged to `~/logs/perch2-server-<jobid>.out`.
