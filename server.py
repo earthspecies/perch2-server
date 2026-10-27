@@ -89,7 +89,7 @@ _SELF_CHECK_TOL = 1e-2
 def _head_logits(spatial, pool_time: bool):
     """Apply the prototype head to `spatial_embedding` [B, T, F, D].
 
-    The head scores each class as sum_k kernel[c, k] * max sim[c, k] + bias[c],
+    The head scores each class as sum_k relu(kernel[c, k]) * max sim[c, k] + bias[c],
     where sim is the cosine similarity between a grid vector and prototype k
     of class c. With `pool_time` the max runs over (time, frequency), which is
     the model's own clip logit; without it the max runs over frequency only,
@@ -97,11 +97,13 @@ def _head_logits(spatial, pool_time: bool):
     """
     import tensorflow as tf
 
+    # Shapes: B clips, T=16 time steps, F=4 frequency bands, D=1536, C classes, K=4 prototypes.
     n_classes, n_protos = _state["protop_kernel"].shape
-    x = tf.math.l2_normalize(spatial, axis=-1)
-    sims = tf.einsum("btfd,dk->btfk", x, _state["prototypes"])
-    sims = tf.reshape(sims, tf.concat([tf.shape(sims)[:3], [n_classes, n_protos]], 0))
-    sims = tf.reduce_max(sims, axis=[1, 2] if pool_time else 2)
+    x = tf.math.l2_normalize(spatial, axis=-1)  # [B, T, F, D]
+    sims = tf.einsum("btfd,dk->btfk", x, _state["prototypes"])  # [D, C*K] -> [B, T, F, C*K]
+    sims = tf.reshape(sims, tf.concat([tf.shape(sims)[:3], [n_classes, n_protos]], 0))  # [B, T, F, C, K]
+    sims = tf.reduce_max(sims, axis=[1, 2] if pool_time else 2)  # [B, C, K], or [B, T, C, K] per step
+    # [C, K] kernel broadcasts over the leading axes; sum over K -> [B, C] or [B, T, C].
     return tf.reduce_sum(sims * _state["protop_kernel"], axis=-1) + _state["bias"]
 
 
@@ -129,7 +131,9 @@ def _load_head(model) -> None:
     # [C, D, K] -> L2-normalised over D -> [D, C*K], so all similarities are one matmul.
     protos = head["prototypes"] / np.linalg.norm(head["prototypes"], axis=1, keepdims=True)
     _state["prototypes"] = tf.constant(protos.transpose(1, 0, 2).reshape(embed_dim, n_classes * n_protos))
-    _state["protop_kernel"] = tf.constant(head["protop_kernel"])
+    # The stored kernel has small negative entries; Perch's head clamps them to 0
+    # (`non_negative_kernel=True` in chirp/models/heads.py), so we do the same.
+    _state["protop_kernel"] = tf.constant(np.maximum(head["protop_kernel"], 0))
     _state["bias"] = tf.constant(head["bias"])
 
     # Self-check on seeded noise plus a tone burst.
