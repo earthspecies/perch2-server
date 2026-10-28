@@ -58,6 +58,8 @@ async def lifespan(app: FastAPI):
         "tfhub_path": tfhub_path,
     })
     model = TaxonomyModelTF.from_tfhub(cfg)
+    # Every path (batch_embed, embed, _run_model) normalises through this method.
+    model.normalize_audio = _normalize_audio
 
     # class_list is a dict[str, ClassList]; "labels" is the species head.
     # ClassList.classes is an ordered tuple of scientific names.
@@ -147,6 +149,20 @@ def _load_head(model) -> None:
         raise RuntimeError(f"Prototype head self-check failed: max |head - label| = {diff:.3e} > {_SELF_CHECK_TOL}.")
     _state["frame_logits_shape"] = list(_head_logits(outputs["spatial_embedding"], pool_time=False).shape[1:])
     print(f"Prototype head self-check passed: max |head - label| = {diff:.3e}; frame logits {_state['frame_logits_shape']}.")
+
+
+def _normalize_audio(framed_audio: np.ndarray, target_peak: float | None) -> np.ndarray:
+    """Hoplite's `normalize_audio`, but an all-zero clip stays zero.
+
+    Hoplite calls `np.divide(..., where=peak > 0)` with no `out=`, so the rows it
+    skips hold whatever memory numpy hands back (values up to ~1e18 were seen).
+    """
+    if target_peak is None:
+        return framed_audio
+    framed_audio = framed_audio - np.mean(framed_audio, axis=-1, keepdims=True)
+    peak_norm = np.max(np.abs(framed_audio), axis=-1, keepdims=True)
+    framed_audio = np.divide(framed_audio, peak_norm, out=np.zeros_like(framed_audio), where=(peak_norm > 0.0))
+    return framed_audio * target_peak
 
 
 def _run_model(audio_batch: np.ndarray) -> dict:
