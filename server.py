@@ -22,6 +22,7 @@ Environment variables:
 import base64
 import io
 import os
+import threading
 from contextlib import asynccontextmanager
 
 import numpy as np
@@ -36,6 +37,9 @@ from ml_collections import config_dict
 # Shared state (populated at startup)
 # ---------------------------------------------------------------------------
 _state: dict = {}
+# Sync endpoints run in a thread pool. Concurrent TF calls were seen to mix up
+# tensors between requests, so the model runs one request at a time.
+_model_lock = threading.Lock()
 
 SAMPLE_RATE = 32_000
 WINDOW_SAMPLES = 5 * SAMPLE_RATE  # 160 000
@@ -159,7 +163,8 @@ def logits(body: LogitsRequest):
 
     audio_batch = np.frombuffer(raw, dtype=np.float32).reshape(n_clips, WINDOW_SAMPLES)
 
-    outputs = _state["model"].batch_embed(audio_batch)
+    with _model_lock:
+        outputs = _state["model"].batch_embed(audio_batch)
 
     # outputs.logits["label"] shape: [B, n_frames, n_classes]
     # With window_size == hop_size == 5 s, n_frames == 1; mean over axis=1 is safe generally.
@@ -185,7 +190,8 @@ async def embed(request: Request):
             detail=f"Expected {WINDOW_SAMPLES} samples (5 s @ 32 kHz), got {len(audio)}.",
         )
 
-    outputs = _state["model"].embed(audio)
+    with _model_lock:
+        outputs = _state["model"].embed(audio)
 
     # outputs.embeddings shape: [frames, channels, embed_dim]
     # Average over frames and channels to get one vector per clip.
