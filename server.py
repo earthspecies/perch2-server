@@ -23,6 +23,7 @@ Environment variables:
 import base64
 import io
 import os
+import threading
 from contextlib import asynccontextmanager
 
 import numpy as np
@@ -37,6 +38,9 @@ from ml_collections import config_dict
 # Shared state (populated at startup)
 # ---------------------------------------------------------------------------
 _state: dict = {}
+# Sync endpoints run in a thread pool. Concurrent TF calls were seen to mix up
+# tensors between requests, so the model runs one request at a time.
+_model_lock = threading.Lock()
 
 SAMPLE_RATE = 32_000
 WINDOW_SAMPLES = 5 * SAMPLE_RATE  # 160 000
@@ -247,7 +251,8 @@ def logits(body: LogitsRequest):
     """
     audio_batch = _decode_clips(body.audio)
 
-    outputs = _state["model"].batch_embed(audio_batch)
+    with _model_lock:
+        outputs = _state["model"].batch_embed(audio_batch)
 
     # outputs.logits["label"] shape: [B, n_frames, n_classes]
     # With window_size == hop_size == 5 s, n_frames == 1; mean over axis=1 is safe generally.
@@ -264,8 +269,10 @@ def frame_logits(body: LogitsRequest):
     time step (the clip logit takes it over time and frequency). Returns
     {"frame_logits": "<base64 float32>", "shape": [N, n_frames, n_classes]}.
     """
-    outputs = _run_model(_decode_clips(body.audio))
-    logits = _head_logits(outputs["spatial_embedding"], pool_time=False).numpy().astype(np.float32)
+    audio_batch = _decode_clips(body.audio)
+    with _model_lock:
+        outputs = _run_model(audio_batch)
+        logits = _head_logits(outputs["spatial_embedding"], pool_time=False).numpy().astype(np.float32)
     return {"frame_logits": base64.b64encode(logits.tobytes()).decode("ascii"), "shape": list(logits.shape)}
 
 
@@ -286,7 +293,8 @@ async def embed(request: Request):
             detail=f"Expected {WINDOW_SAMPLES} samples (5 s @ 32 kHz), got {len(audio)}.",
         )
 
-    outputs = _state["model"].embed(audio)
+    with _model_lock:
+        outputs = _state["model"].embed(audio)
 
     # outputs.embeddings shape: [frames, channels, embed_dim]
     # Average over frames and channels to get one vector per clip.
